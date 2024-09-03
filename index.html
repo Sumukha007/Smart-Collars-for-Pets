@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart Collars for Pets</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        .bg {
+            background-image: url('bg.avif'); /* Add your background image */
+            height: 100%;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: cover;
+            position: relative;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        .container {
+            text-align: center;
+            padding: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 10px;
+            max-width: 500px; /* Restricting the width for better alignment */
+            margin: 0 auto; /* Center the container */
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 20px;
+            color: black; /* Change heading color to black */
+        }
+        p {
+            color: black; /* Change "Select your pet" color to black */
+            margin-bottom: 5px; /* Space between label and input field */
+            text-align: left; /* Align labels to the left */
+        }
+        .input-field {
+            margin: 10px 0;
+            padding: 10px;
+            font-size: 1em;
+            width: 100%; /* Full width input fields */
+        }
+        .btn {
+            padding: 10px 20px;
+            font-size: 1em;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            width: 48%; /* Buttons take half the width for side-by-side alignment */
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        .warning {
+            color: red;
+            font-size: 2em; /* Increased font size for prominence */
+            margin-top: 10px;
+            position: fixed;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 2px solid red; /* Thicker border for emphasis */
+            padding: 20px; /* Increased padding */
+            width: 100%;
+            text-align: center;
+            z-index: 1000;
+            display: none; /* Initially hidden */
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed;
+            z-index: 1000;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            width: 50vw; /* Modal width */
+            height: 50vh; /* Modal height */
+            overflow: hidden;
+            transition: all 0.3s ease-in-out;
+        }
+        .modal-open {
+            display: block;
+        }
+        .modal-minimized {
+            width: 15vw;
+            height: 15vh;
+            top: 0;
+            left: 0;
+            transform: translate(0, 0);
+        }
+        .modal-header, .modal-footer {
+            padding: 10px;
+            background-color: #f1f1f1;
+            border-bottom: 1px solid #ddd;
+        }
+        .modal-footer {
+            border-top: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-body {
+            height: calc(100% - 60px); /* Adjust height to fit within the modal */
+        }
+        .minimize-btn {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5em;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg">
+        <div class="container">
+            <h1>Smart Collars for Pets</h1>
+            <p>Select your pet:</p>
+            <select id="petType" class="input-field" onchange="handlePetTypeChange()">
+                <option value="">Select Pet</option>
+                <option value="dog">Dog</option>
+                <option value="cat">Cat</option>
+            </select>
+            <p>Enter collar ID:</p>
+            <input type="text" id="collarId" class="input-field" placeholder="Enter collar ID" maxlength="8" onchange="resetLocation()">
+            <p>Enter boundary radius (in meters):</p>
+            <input type="number" id="radius" class="input-field" placeholder="Enter boundary radius in meters" min="0">
+            
+            <!-- Buttons are now below the input fields -->
+            <div>
+                <button class="btn" onclick="initializeMap()">Start Tracking</button>
+                <button class="btn" onclick="stopTracking()">Stop Tracking</button>
+            </div>
+            
+            <button class="btn" style="width: 100%;" onclick="showLocationHistory()">Show Location History</button> <!-- Full-width history button -->
+        </div>
+    </div>
+
+    <!-- Warning message -->
+    <div id="warning" class="warning"></div>
+
+    <!-- Modal for the map -->
+    <div id="mapModal" class="modal">
+        <div class="modal-header">
+            <button class="btn minimize-btn" onclick="toggleMapModal()">_</button> <!-- Minimize button -->
+            <h2>Pet Tracking Map</h2>
+        </div>
+        <div id="map" class="modal-body"></div>
+        <div class="modal-footer">
+            <button id="stopTrackingBtn" class="btn" onclick="stopTracking()">Stop Tracking</button>
+            <button class="btn" onclick="toggleMapModal()">Close</button>
+        </div>
+    </div>
+    <audio id="beepSound" src="beep-warning-6387.mp3"></audio>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        var campusCenter = [13.133495151187617, 77.56798499887222]; // BMS Institute of Technology and Management coordinates (lat, lng)
+        var locationHistory = [];
+        var maxHistory = 5;
+        var map;
+        var marker;
+        var circle;
+        var currentLocation = campusCenter;
+        var tracking = false;
+        var beepSound = document.getElementById('beepSound');
+
+        function handlePetTypeChange() {
+            stopTracking();
+            updateCollarIdPrefix();
+            resetLocation();
+            document.getElementById('mapModal').classList.remove('modal-open'); // Hide the map modal
+            document.getElementById('mapModal').classList.add('modal-minimized'); // Ensure it's minimized
+        }
+
+        function updateCollarIdPrefix() {
+            var petType = document.getElementById('petType').value;
+            var collarIdInput = document.getElementById('collarId');
+            collarIdInput.value = petType ? petType.substring(0, 3) : '';
+            collarIdInput.setSelectionRange(collarIdInput.value.length, collarIdInput.value.length);
+        }
+
+        function resetLocation() {
+            currentLocation = campusCenter;
+            locationHistory = [];
+            document.getElementById('warning').style.display = 'none'; // Hide warning initially
+
+            if (marker) {
+                marker.setLatLng(campusCenter);
+                marker.bindPopup('BMS Institute of Technology and Management').openPopup();
+            }
+            if (circle) {
+                circle.setLatLng(campusCenter);
+            }
+            if (map) {
+                map.setView(campusCenter, 15);
+            }
+        }
+
+        function initializeMap() {
+            var petType = document.getElementById('petType').value;
+            var radius = document.getElementById('radius').value;
+            var collarId = document.getElementById('collarId').value;
+
+            if (!petType) {
+                alert('Please select a pet type.');
+                return;
+            }
+            if (!radius) {
+                alert('Please enter a boundary radius.');
+                return;
+            }
+            if (!validateCollarId(collarId, petType)) {
+                alert('Invalid collar ID. It should start with "' + petType + '" and be 8 characters long.');
+                return;
+            }
+
+            var mapModal = document.getElementById('mapModal');
+            mapModal.classList.add('modal-open'); // Show and animate the modal in
+            mapModal.classList.remove('modal-minimized'); // Remove minimized class if present
+
+            if (!map) {
+                map = L.map('map').setView(campusCenter, 15);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(map);
+
+                marker = L.marker(campusCenter).addTo(map)
+                    .bindPopup('BMS Institute of Technology and Management')
+                    .openPopup();
+
+                circle = L.circle(campusCenter, {
+                    color: 'red',
+                    fillColor: '#f03',
+                    fillOpacity: 0.2,
+                    radius: radius
+                }).addTo(map);
+            } else {
+                circle.setRadius(radius);
+            }
+
+            tracking = true;
+            updateLocation();
+
+            document.getElementById('stopTrackingBtn').style.display = 'block'; // Show the stop button
+        }
+
+        function validateCollarId(collarId, petType) {
+            var prefix = petType === "dog" ? "dog" : "cat";
+            var regex = new RegExp("^" + prefix + "\\d{5}$");
+            return regex.test(collarId);
+        }
+
+        function updateLocation() {
+            if (!tracking) return;
+
+            var delta = 0.0001; // Approx. 10 meters
+            var newLat, newLng;
+
+            if (Math.random() < 0.6) {
+                // Pet leaves the boundary
+                var distance = calculateDistance(currentLocation, campusCenter);
+                if (distance > circle.getRadius()) {
+                    if (Math.random() < 0.85) {
+                        // 85% chance to return to the boundary
+                        var angle = Math.random() * 2 * Math.PI; // Random angle
+                        var radius = circle.getRadius();
+                        newLat = campusCenter[0] + radius / 111320 * Math.sin(angle);
+                        newLng = campusCenter[1] + radius / (111320 * Math.cos(campusCenter[0] * Math.PI / 180)) * Math.cos(angle);
+                    } else {
+                        // Randomly move outside the boundary
+                        newLat = currentLocation[0] + (Math.random() - 0.5) * delta * 2;
+                        newLng = currentLocation[1] + (Math.random() - 0.5) * delta * 2;
+                    }
+                } else {
+                    // Randomly move inside the boundary
+                    newLat = currentLocation[0] + (Math.random() - 0.5) * delta;
+                    newLng = currentLocation[1] + (Math.random() - 0.5) * delta;
+                }
+            } else {
+                // Pet stays within the boundary
+                newLat = currentLocation[0] + (Math.random() - 0.5) * delta;
+                newLng = currentLocation[1] + (Math.random() - 0.5) * delta;
+            }
+
+            var newPosition = [newLat, newLng];
+
+            locationHistory.push(newPosition);
+            if (locationHistory.length > maxHistory) {
+                locationHistory.shift(); // Remove oldest location
+            }
+
+            currentLocation = newPosition;
+            map.setView(newPosition);
+
+            marker.setLatLng(newPosition);
+            marker.bindPopup('Current Location').openPopup();
+
+            var radius = document.getElementById('radius').value;
+            circle.setLatLng(campusCenter).setRadius(radius);
+
+            var distance = calculateDistance(newPosition, campusCenter);
+            if (distance > radius) {
+                var warningElem = document.getElementById('warning');
+                warningElem.textContent = 'Warning: Pet has left the boundary!';
+                warningElem.style.display = 'block'; // Show the warning
+                beepSound.play(); // Play beep sound
+            } else {
+                document.getElementById('warning').style.display = 'none'; // Hide warning
+            }
+
+            setTimeout(updateLocation, 3000); // Continue updating location
+        }
+
+        function calculateDistance(coord1, coord2) {
+            var R = 6371e3; // Earth radius in meters
+            var lat1 = coord1[0] * Math.PI / 180;
+            var lat2 = coord2[0] * Math.PI / 180;
+            var deltaLat = (coord2[0] - coord1[0]) * Math.PI / 180;
+            var deltaLng = (coord2[1] - coord1[1]) * Math.PI / 180;
+
+            var a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+                    Math.cos(lat1) * Math.cos(lat2) *
+                    Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return R * c; // Distance in meters
+        }
+
+        function stopTracking() {
+            tracking = false;
+            document.getElementById('stopTrackingBtn').style.display = 'none'; // Hide the stop button
+            document.getElementById('warning').style.display = 'none'; // Hide warning
+        }
+
+        function showLocationHistory() {
+            var popup = window.open("", "LocationHistory", "width=400,height=600");
+            popup.document.write("<h3>Location History</h3>");
+            locationHistory.forEach((loc, index) => {
+                popup.document.write(`<p>Location ${index + 1}: [${loc[0].toFixed(6)}, ${loc[1].toFixed(6)}]</p>`);
+            });
+        }
+
+        function toggleMapModal() {
+            var modal = document.getElementById('mapModal');
+            if (modal.classList.contains('modal-open')) {
+                modal.classList.remove('modal-open');
+                modal.classList.add('modal-minimized');
+            } else {
+                modal.classList.remove('modal-minimized');
+                modal.classList.add('modal-open');
+            }
+        }
+    </script>
+</body>
+</html>
